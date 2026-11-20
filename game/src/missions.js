@@ -6,6 +6,7 @@
 import { clamp, dist, pick, randRange } from './util.js';
 import { createCar, VEHICLE_TYPES } from './vehicles.js';
 import { addCash, unlockWeapon } from './player.js';
+import { awardRespect, tipMultiplier } from './respect.js';
 
 export function createMissionState() {
   return {
@@ -149,7 +150,16 @@ function enterStep(G, mission) {
     completeMission(G);
     return;
   }
-  mission.stepState = { checkpoint: 0, holdTime: 0, collected: 0, killed: 0 };
+  // A step is entered exactly once: the briefing dialog's close callback
+  // can fire after the step already advanced (see main.js), and re-entering
+  // would spawn a second copy of the step's cars and enemies.
+  if (mission.enteredStep === mission.stepIndex) return;
+  mission.enteredStep = mission.stepIndex;
+  // The deliver step checks stepState.targetCar, so the steal step's car
+  // must survive the step transition — a full reset made m1/m3's deliver
+  // steps uncompletable (targetCar undefined, okCar always false).
+  const targetCar = mission.stepState ? mission.stepState.targetCar : null;
+  mission.stepState = { checkpoint: 0, holdTime: 0, collected: 0, killed: 0, targetCar };
   mission.timer = step.seconds || 0;
   if (step.type === 'steal') {
     const car = createCar(step.carType, step.x, step.y, 0, { driver: 'parked', mission: true });
@@ -298,6 +308,8 @@ function completeMission(G) {
   G.stats.missionsDone += 1;
   G.hud.showBanner('MISSION PASSED', def.title + '  ·  +' + def.reward, true);
   G.audio.missionPass();
+  // Missions pay Respect too — enough to climb a rank across the story.
+  awardRespect(G, Math.round(60 + def.reward / 25), def.title);
   G.police.clearWanted(G, '');
   G.saveGame();
   updateObjective(G);
@@ -422,6 +434,7 @@ function checkPackages(G) {
       addCash(G, 100);
       G.audio.pickup();
       G.hud.showMessage('Hidden package ' + G.missionState.packagesFound + '/10 — +$100', 'good');
+      awardRespect(G, 15, 'hidden package');
       if (G.missionState.packagesFound >= 10) {
         addCash(G, 1500);
         G.hud.showBanner('COLLECTOR', 'All 10 hidden packages — bonus $1,500', true);
@@ -468,10 +481,12 @@ function updateTaxi(G, dt) {
     }
   } else if (taxi.state === 'toDest') {
     if (dist(player.x, player.y, taxi.dest.x, taxi.dest.y) < 70 && Math.hypot(player.car.vx, player.car.vy) < 40) {
-      const tip = taxi.timer > 0 ? Math.round(taxi.timer) : 0;
+      // Tips grow with district standing (and +50% from Made rank up).
+      const tip = Math.round((taxi.timer > 0 ? taxi.timer : 0) * tipMultiplier(G));
       const total = taxi.fare + tip;
       addCash(G, total);
       G.hud.showMessage('Fare complete — earned $' + total + ' (tip $' + tip + ').', 'good');
+      awardRespect(G, 25, 'taxi fare');
       G.stats.fares += 1;
       taxi.state = 'idle';
       updateObjective(G);
@@ -516,6 +531,7 @@ function updateRace(G, dt) {
       if (t < 150) {
         addCash(G, 300);
         G.hud.showBanner('RACE WON', 'Sunset GP in ' + mins + ':' + secs.padStart(4, '0') + ' — +$300', true);
+        awardRespect(G, 60, 'Sunset GP win');
       } else {
         G.hud.showBanner('RACE DONE', 'Sunset GP in ' + mins + ':' + secs.padStart(4, '0') + (isBest ? ' — new best!' : ''), true);
       }

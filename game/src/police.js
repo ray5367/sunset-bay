@@ -5,6 +5,7 @@ import { clamp, dist, randRange, turnToward } from './util.js';
 import { ROADS, blockedAt, moveCircle } from './world.js';
 import { createCar, carSpeed, driveCar } from './vehicles.js';
 import { createPed, scarePeds } from './pedestrians.js';
+import { heatMultiplier } from './respect.js';
 
 const STAR_HEAT = [12, 30, 50, 70, 88];
 
@@ -23,7 +24,8 @@ export function starsForHeat(heat) {
 export function addHeat(G, amount, reason) {
   const wanted = G.wanted;
   const before = wanted.stars;
-  wanted.heat = clamp(wanted.heat + amount, 0, 100);
+  // District standing (and Kingpin rank) slows how fast heat builds.
+  wanted.heat = clamp(wanted.heat + amount * heatMultiplier(G), 0, 100);
   wanted.stars = starsForHeat(wanted.heat);
   wanted.unseenTimer = 0;
   if (wanted.stars > before) {
@@ -133,7 +135,10 @@ export function updatePolice(G, dt) {
     const extra = G.cops[G.cops.length - 1];
     const d = dist(extra.car.x, extra.car.y, G.player.x, G.player.y);
     if (d > 700) {
-      G.cars.splice(G.cars.indexOf(extra.car), 1);
+      // The car may already be gone (wrecked/exploded): indexOf -1 would
+      // make splice remove the last car in the list instead.
+      const ci = G.cars.indexOf(extra.car);
+      if (ci >= 0) G.cars.splice(ci, 1);
       G.cops.pop();
     }
   }

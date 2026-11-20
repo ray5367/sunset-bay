@@ -2,6 +2,7 @@
 // routes input between play, dialogs, shops, pause and map, handles
 // wasted/busted, saving, and staged screenshot scenes (?shot=...).
 
+import { createRespect, loadRespect, saveRespect } from './respect.js';
 import { Input } from './input.js';
 import { SoundBank } from './audio.js';
 import { ParticleSystem } from './particles.js';
@@ -15,7 +16,7 @@ import { createWanted, updateWanted, updatePolice, addHeat, clearWanted, damageC
 import { WEAPONS, tryPlayerShoot, meleeAttack, enemyShootAt, updateBullets, updateExplosions } from './combat.js';
 import {
   createMissionState, startMission, forceMissionStep, updateMissions, missionStartMarker, nextMissionId,
-  onCarStolen, onPedDown, onCopDown, damageEnemy, onPlayerDown, startRace, updateObjective,
+  onCarStolen, onPedDown, onCopDown, damageEnemy, onPlayerDown, startRace, updateObjective, spawnEnemy,
 } from './missions.js';
 import { loadSettings, writeSettings, loadSave, writeSave, hasSave, clearSave } from './save.js';
 import { mulberry32, clamp, dist } from './util.js';
@@ -58,6 +59,7 @@ const G = {
   pendingExplosions: [],
   particles: new ParticleSystem(),
   wanted: createWanted(),
+  respect: createRespect(),
   missionState: createMissionState(),
   camera: new Camera(),
   input,
@@ -89,6 +91,7 @@ function buildFreshState(save) {
   G.pendingExplosions = [];
   G.particles = new ParticleSystem();
   G.wanted = createWanted();
+  G.respect = createRespect();
   G.missionState = createMissionState();
   G.heli = null;
   G.objective = null;
@@ -129,6 +132,7 @@ function applySave(save) {
       if (player.weapons[name]) Object.assign(player.weapons[name], save.weapons[name]);
     }
   }
+  if (save.respect) loadRespect(G.respect, save.respect);
   if (save.raceBest) G.missionState.race.best = save.raceBest;
   Object.assign(G.stats, save.stats || {});
 }
@@ -147,6 +151,7 @@ G.saveGame = function saveGame() {
     packages: G.world.packages.map((p) => p.collected),
     weapons: player.weapons,
     raceBest: G.missionState.race.best,
+    respect: saveRespect(G.respect),
     stats: G.stats,
     savedAt: Date.now(),
   });
@@ -238,6 +243,12 @@ function openShopPanel(marker) {
         car.explodeTimer = -1;
         hud.showMessage('Good as new.', 'good');
       }, car.health >= car.maxHealth),
+      // Respect rank 2 (Hustler) unlocks the performance upgrade.
+      opt(car.tuned ? 'Engine tune — installed (+25% top speed)' : (G.respect.rank >= 1 ? 'Engine tune — +25% top speed' : 'Engine tune — unlocks at Hustler rank'), 900, () => {
+        player.cash -= 900;
+        car.tuned = true;
+        hud.showMessage('Engine tuned — this car is 25% faster.', 'good');
+      }, car.tuned || G.respect.rank < 1),
     ]);
   } else if (marker.kind === 'diner') {
     hud.openPanel('SUNSET DINER', [
@@ -326,7 +337,12 @@ function applyStaging() {
     G.camera.y = clamp(car.y - canvas.height / 2, 0, 3600 - canvas.height);
     G.hud.showMessage('Cruising the boardwalk boulevard.', 'info');
   } else if (shot === 'chase') {
-    const car = createCar('muscle', 1575, 1575, 0, { driver: 'player', owned: true });
+    // Golden-hour 5-star pursuit in Downtown: the cover shot. Respect is
+    // seeded to a state reachable in play (Hustler, Respected in Downtown).
+    G.respect.points = 200;
+    G.respect.rank = 1;
+    G.respect.standing = { Downtown: 55 };
+    const car = createCar('muscle', 1800, 1125, 0, { driver: 'player', owned: true });
     car.color = '#2d3436';
     G.cars.push(car);
     G.player.car = car;
@@ -334,22 +350,68 @@ function applyStaging() {
     G.player.y = car.y;
     car.vx = 300;
     for (let i = 0; i < 3; i += 1) {
-      const cruiser = createCar('cruiser', 1575 - 160 - i * 90, 1575 + (i - 1) * 40, 0, { driver: 'police' });
+      const cruiser = createCar('cruiser', 1800 - 160 - i * 90, 1125 + (i - 1) * 40, 0, { driver: 'police' });
       cruiser.siren = true;
       cruiser.vx = 280;
       G.cars.push(cruiser);
       const ped = { x: cruiser.x, y: cruiser.y, angle: 0, state: 'idle', health: 100, isCop: true, shirt: '#1e3799', pants: '#2c3e50', skin: '#f1c27d', walkPhase: 0, speed: 0, downTimer: 0 };
       G.cops.push({ car: cruiser, ped, state: 'pursue', shootTimer: 1, bustTimer: 0, inCar: true });
     }
-    // Real mission step: the chase leg of The Getaway, at 3 stars.
+    // Roadblock ahead on the avenue: two cruisers nose-in to the player.
+    for (let i = 0; i < 2; i += 1) {
+      const block = createCar('cruiser', 2300, 1125 + (i === 0 ? -55 : 55), Math.PI, { driver: 'police' });
+      block.siren = true;
+      G.cars.push(block);
+      const ped = { x: block.x, y: block.y, angle: 0, state: 'idle', health: 100, isCop: true, shirt: '#1e3799', pants: '#2c3e50', skin: '#f1c27d', walkPhase: 0, speed: 0, downTimer: 0 };
+      G.cops.push({ car: block, ped, state: 'pursue', shootTimer: 1, bustTimer: 0, inCar: true });
+    }
+    // Real mission step: the chase leg of The Getaway, pushed to 5 stars
+    // (helicopter) — the chase step adds heat, then the top-up.
     forceMissionStep(G, 'm2', 1);
-    addHeat(G, 25);
+    addHeat(G, 75);
   } else if (shot === 'mission') {
+    // Mara Quinn briefing, Respect bar nearly full — the story shot.
+    G.respect.points = 120;
+    G.respect.standing = { 'Old Town': 30 };
     startMission(G, 'm1');
-    G.player.x = 1125;
-    G.player.y = 1520;
+    G.player.x = 880;
+    G.player.y = 1500;
     G.camera.x = clamp(G.player.x - canvas.width / 2, 0, 3600 - canvas.width);
     G.camera.y = clamp(G.player.y - canvas.height / 2, 0, 3600 - canvas.height);
+  } else if (shot === 'street') {
+    // Street-level daytime action in Downtown: on foot, Kane's crew closing
+    // in, traffic and pedestrians around. Respect seeded to Made / Feared.
+    G.respect.points = 450;
+    G.respect.rank = 2;
+    G.respect.standing = { Downtown: 80 };
+    G.player.x = 1600;
+    G.player.y = 1150;
+    G.player.angle = 0;
+    G.player.armor = 100;
+    spawnEnemy(G, 1720, 1150, {});
+    spawnEnemy(G, 1480, 1260, {});
+    G.camera.x = clamp(G.player.x - canvas.width / 2, 0, 3600 - canvas.width);
+    G.camera.y = clamp(G.player.y - canvas.height / 2, 0, 3600 - canvas.height);
+    G.hud.showMessage('Kane’s crew is moving on Downtown.', 'warn');
+  } else if (shot === 'customs') {
+    // Bay Customs with the rank-gated engine tune on offer. Respect seeded
+    // to Hustler; the panel opens over the live garage scene.
+    G.respect.points = 200;
+    G.respect.rank = 1;
+    G.respect.standing = { 'Old Town': 55 };
+    const marker = G.world.markers.find((m) => m.kind === 'customs');
+    const car = createCar('sports', marker.x - 60, marker.y + 90, -Math.PI / 2, { driver: 'player', owned: true });
+    car.color = '#e74c3c';
+    G.cars.push(car);
+    G.player.car = car;
+    G.player.x = car.x;
+    G.player.y = car.y;
+    G.player.angle = car.angle;
+    G.player.cash = 1500;
+    G.camera.x = clamp(car.x - canvas.width / 2, 0, 3600 - canvas.width);
+    G.camera.y = clamp(car.y - canvas.height / 2, 0, 3600 - canvas.height);
+    G.hud.showMessage('RESPECT UP — Hustler rank: Bay Customs engine tune unlocked', 'good');
+    openShopPanel(marker);
   }
   beginGame();
 }
@@ -420,7 +482,8 @@ function togglePause(show) {
   if (show) {
     G.state = 'paused';
     document.getElementById('pauseStats').textContent =
-      'Cash ' + G.player.cash + '  ·  Missions ' + G.missionState.completed.length + '/6' +
+      'Cash ' + G.player.cash + '  ·  Respect ' + G.respect.points + ' (' + ['Rook', 'Hustler', 'Made', 'Kingpin', 'Legend of the Bay'][G.respect.rank] + ')' +
+      '  ·  Missions ' + G.missionState.completed.length + '/6' +
       '  ·  Packages ' + G.missionState.packagesFound + '/10' +
       '  ·  Cars stolen ' + G.stats.carsStolen + '  ·  Fares ' + G.stats.fares;
     document.getElementById('pause').style.display = 'flex';
@@ -478,6 +541,15 @@ function update(dt) {
   }
 
   if (input.wasPressed('KeyE')) handleInteract();
+  // A dialog or shop panel opened by that interaction freezes the world
+  // for the rest of this frame — otherwise updateMissions below advances
+  // the just-started mission while its briefing is still open (m1's goto
+  // step completes instantly, the player spawns on the marker), and the
+  // dialog-close callback then re-enters the already-advanced step.
+  if (hud.isBlocking()) {
+    hud.update(G, dt);
+    return;
+  }
   if (input.wasPressed('KeyH') && player.car) audio.horn();
 
   if (player.car) {

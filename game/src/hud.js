@@ -6,11 +6,12 @@ import { clamp, dist, formatCash, formatClock } from './util.js';
 import { ROADS, ROAD_HALF, BEACH_TOP, WATER_TOP, WORLD_SIZE, districtAt } from './world.js';
 import { WEAPONS } from './combat.js';
 import { carSpeed } from './vehicles.js';
+import { RESPECT_RANKS, respectProgress, standingName } from './respect.js';
 
 export class HUD {
   constructor() {
     this.el = {};
-    for (const id of ['stats', 'cash', 'healthBar', 'healthFill', 'armorFill', 'stars', 'weaponBox', 'weaponName', 'ammo', 'speedBox', 'speed', 'clock', 'district', 'objective', 'messages', 'banner', 'bannerTitle', 'bannerSub', 'dialog', 'dialogSpeaker', 'dialogText', 'panel', 'panelTitle', 'panelOptions', 'vignette', 'bustMeter', 'bustFill', 'minimap', 'bigmap', 'dead', 'deadTitle', 'deadSub', 'hint']) {
+    for (const id of ['stats', 'cash', 'healthBar', 'healthFill', 'armorFill', 'stars', 'respectRank', 'respectFill', 'weaponBox', 'weaponName', 'ammo', 'speedBox', 'speed', 'clock', 'district', 'objective', 'messages', 'banner', 'bannerTitle', 'bannerSub', 'dialog', 'dialogSpeaker', 'dialogText', 'panel', 'panelTitle', 'panelOptions', 'vignette', 'bustMeter', 'bustFill', 'minimap', 'bigmap', 'dead', 'deadTitle', 'deadSub', 'hint']) {
       this.el[id] = document.getElementById(id);
     }
     this.miniCtx = this.el.minimap.getContext('2d');
@@ -182,7 +183,14 @@ export class HUD {
     const speed = player.car ? Math.round(carSpeed(player.car) * 0.24) : Math.round(player.speed * 0.24);
     this.el.speed.textContent = speed + ' km/h';
     this.el.clock.textContent = formatClock(G.clock);
-    this.el.district.textContent = districtAt(player.x, player.y);
+    // Respect badge + progress, and the district's standing (the city
+    // keeps score of what you do in each district).
+    const r = G.respect;
+    const district = districtAt(player.x, player.y);
+    const rank = RESPECT_RANKS[Math.min(r.rank, RESPECT_RANKS.length - 1)];
+    this.el.respectRank.textContent = 'RESPECT · ' + rank.name.toUpperCase();
+    this.el.respectFill.style.width = (respectProgress(r) * 100).toFixed(0) + '%';
+    this.el.district.textContent = district + ' · ' + standingName(r, district);
     if (G.objective) {
       const d = Math.round(dist(player.x, player.y, G.objective.x, G.objective.y));
       this.el.objective.textContent = '◆ ' + G.objective.label + '  ·  ' + d + 'm';

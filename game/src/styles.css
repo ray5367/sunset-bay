@@ -87,6 +87,27 @@ body.in-title #hint {
 
 #stars.wanted { color: #ffd700; }
 
+#respect { margin-top: 6px; }
+
+#respectRank {
+  font-size: 13px;
+  font-weight: 800;
+  letter-spacing: 2px;
+  color: #ffd23f;
+}
+
+#respect .rbar {
+  width: 190px;
+  height: 6px;
+  margin-top: 3px;
+  background: rgba(0, 0, 0, 0.55);
+  border: 1px solid rgba(255, 255, 255, 0.5);
+  border-radius: 3px;
+  overflow: hidden;
+}
+
+#respectFill { background: #ffd23f; transition: width 0.2s; }
+
 #minimap {
   position: fixed;
   top: 14px;

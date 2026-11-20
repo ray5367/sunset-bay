@@ -22,7 +22,7 @@ export function createCar(type, x, y, angle, opts) {
   const def = VEHICLE_TYPES[type];
   const o = opts || {};
   return {
-    id: nextCarId,
+    id: nextCarId++,
     type,
     name: def.name,
     x, y, angle,
@@ -190,11 +190,13 @@ export function driveCar(G, car, throttle, steer, dt) {
   const def = VEHICLE_TYPES[car.type];
   const surface = surfaceAt(car.x, car.y);
   const grip = surface === 'sand' ? 0.45 : surface === 'road' ? 1 : 0.8;
-  const maxSpeed = def.maxSpeed * grip;
+  // Bay Customs engine tune (Respect rank 2): +25% top speed, +15% accel.
+  const tune = car.tuned ? 1.25 : 1;
+  const maxSpeed = def.maxSpeed * grip * tune;
   const forwardX = Math.cos(car.angle);
   const forwardY = Math.sin(car.angle);
   const speedAlong = car.vx * forwardX + car.vy * forwardY;
-  const accel = throttle >= 0 ? def.accel * throttle : def.brake * throttle;
+  const accel = throttle >= 0 ? def.accel * throttle * (car.tuned ? 1.15 : 1) : def.brake * throttle;
   let newAlong = speedAlong + accel * dt;
   newAlong = clamp(newAlong, -def.maxSpeed * 0.35, maxSpeed);
   // Steering: sharper at moderate speed, none standing still.
